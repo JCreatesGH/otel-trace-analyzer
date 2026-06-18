@@ -34,14 +34,21 @@ function toMs(nano: any): number {
   return nano ? Number(nano) / 1e6 : 0;
 }
 
-export function buildTree(spans: Span[]): SpanNode | null {
+/** Build every root tree (a span whose parent is absent is a root), widest first.
+ * Handles forests — multi-root traces no longer lose all-but-one subtree. */
+export function buildForest(spans: Span[]): SpanNode[] {
   const nodes = new Map<string, SpanNode>();
   for (const s of spans) nodes.set(s.spanId, { ...s, children: [], duration: s.end - s.start });
-  let root: SpanNode | null = null;
+  const roots: SpanNode[] = [];
   for (const n of nodes.values()) {
     if (n.parentSpanId && nodes.has(n.parentSpanId)) nodes.get(n.parentSpanId)!.children.push(n);
-    else root = root && root.duration >= n.duration ? root : n;   // pick widest as root if multiple
+    else roots.push(n);
   }
   for (const n of nodes.values()) n.children.sort((a, b) => a.start - b.start);
-  return root;
+  return roots.sort((a, b) => b.duration - a.duration);
+}
+
+/** The primary (widest) root tree, or null. */
+export function buildTree(spans: Span[]): SpanNode | null {
+  return buildForest(spans)[0] ?? null;
 }

@@ -1,4 +1,4 @@
-import { Span, SpanNode, buildTree } from "./model.js";
+import { Span, SpanNode, buildTree, buildForest } from "./model.js";
 
 export function flatten(node: SpanNode): SpanNode[] {
   return [node, ...node.children.flatMap(flatten)];
@@ -57,15 +57,38 @@ export function findNPlusOne(root: SpanNode, threshold = 5): NPlusOne[] {
   return out.sort((a, b) => b.count - a.count);
 }
 
+/** Total *self* time per service across a tree (uses the span `service` field). */
+export function byService(root: SpanNode): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const n of flatten(root)) {
+    const svc = n.service ?? "unknown";
+    out[svc] = (out[svc] ?? 0) + selfTime(n);
+  }
+  return out;
+}
+
 export function analyze(spans: Span[]) {
-  const root = buildTree(spans);
-  if (!root) return null;
-  const slow = slowestSpan(root);
+  const forest = buildForest(spans);
+  if (!forest.length) return null;
+  const root = forest[0];                      // widest tree drives critical path
+  const all = forest.flatMap(flatten);         // but counts/services span the whole forest
+
+  let slowName = root.name, slowSelf = -1;
+  const services: Record<string, number> = {};
+  for (const n of all) {
+    const st = selfTime(n);
+    if (st > slowSelf) { slowSelf = st; slowName = n.name; }
+    const svc = n.service ?? "unknown";
+    services[svc] = (services[svc] ?? 0) + st;
+  }
+
   return {
     total: totalDuration(root),
-    spanCount: flatten(root).length,
+    rootCount: forest.length,
+    spanCount: all.length,
     criticalPath: criticalPath(root).map((s) => s.name),
-    slowest: { name: slow.span.name, selfTime: slow.selfTime },
-    nPlusOne: findNPlusOne(root),
+    slowest: { name: slowName, selfTime: slowSelf },
+    nPlusOne: forest.flatMap((r) => findNPlusOne(r)).sort((a, b) => b.count - a.count),
+    byService: services,
   };
 }
