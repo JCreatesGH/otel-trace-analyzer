@@ -1,7 +1,7 @@
 {
   "name": "otel-trace-analyzer",
-  "version": "0.2.0",
-  "description": "Analyze OpenTelemetry traces: critical path, slowest span by self-time, per-service time, and N+1 detection.",
+  "version": "0.3.0",
+  "description": "Analyze OpenTelemetry traces: critical path, slowest span by self-time, per-service time, N+1 detection, and error spans.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

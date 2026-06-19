@@ -6,6 +6,7 @@ export interface Span {
   start: number;     // ms (or any consistent unit)
   end: number;
   service?: string;
+  status?: "OK" | "ERROR" | "UNSET";   // normalized span status
 }
 
 export interface SpanNode extends Span {
@@ -26,12 +27,36 @@ export function loadSpans(input: any): Span[] {
       name: s.name ?? "span",
       start, end,
       service: s.service ?? s.resource?.service?.name,
+      status: statusOf(s),
     };
   });
 }
 
 function toMs(nano: any): number {
   return nano ? Number(nano) / 1e6 : 0;
+}
+
+/** Normalize an OTel span status from the many shapes in the wild:
+ * `status.code` (numeric 2=ERROR, or STATUS_CODE_ERROR / "ERROR"), an `error`
+ * flag, or an `http.status_code` >= 500. */
+function statusOf(s: any): "OK" | "ERROR" | "UNSET" | undefined {
+  const raw = s.status?.code ?? s.statusCode ?? (typeof s.status === "string" ? s.status : undefined);
+  if (typeof raw === "number") {
+    if (raw === 2) return "ERROR";
+    if (raw === 1) return "OK";
+    if (raw === 0) return "UNSET";
+  }
+  if (typeof raw === "string") {
+    const u = raw.toUpperCase();
+    if (u.includes("ERROR")) return "ERROR";
+    if (u.includes("OK")) return "OK";
+    if (u.includes("UNSET")) return "UNSET";
+  }
+  if (s.error === true) return "ERROR";
+  const http = Number(s.attributes?.["http.status_code"] ??
+    s.attributes?.["http.response.status_code"] ?? s["http.status_code"]);
+  if (Number.isFinite(http) && http >= 500) return "ERROR";
+  return undefined;
 }
 
 /** Build every root tree (a span whose parent is absent is a root), widest first.

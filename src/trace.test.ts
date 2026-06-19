@@ -3,7 +3,7 @@ import { writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadSpans, buildTree, buildForest } from "./model";
-import { selfTime, slowestSpan, criticalPath, findNPlusOne, byService, analyze } from "./analyze";
+import { selfTime, slowestSpan, criticalPath, findNPlusOne, byService, errorSpans, analyze } from "./analyze";
 import { run, formatReport } from "./cli";
 
 // root(0..100): handler(0..95) -> [db(5..15), render(20..90)], plus auth(0..3)
@@ -103,6 +103,26 @@ describe("byService", () => {
   });
 });
 
+describe("error spans", () => {
+  it("normalizes status from many shapes and surfaces error spans", () => {
+    const spans = loadSpans([
+      { spanId: "r", name: "GET /", start: 0, end: 100, service: "gateway" },
+      { spanId: "a", parentSpanId: "r", name: "db.query", start: 5, end: 40, service: "db", status: { code: 2 } },     // numeric ERROR
+      { spanId: "b", parentSpanId: "r", name: "auth", start: 40, end: 50, status: "STATUS_CODE_ERROR" },               // string ERROR
+      { spanId: "c", parentSpanId: "r", name: "cache", start: 50, end: 60, attributes: { "http.status_code": 503 } },  // http 5xx
+      { spanId: "d", parentSpanId: "r", name: "ok-op", start: 60, end: 70, status: { code: 1 } },                       // OK
+    ]);
+    const errs = errorSpans(buildTree(spans)!);
+    expect(errs.map((e) => e.name).sort()).toEqual(["auth", "cache", "db.query"]);
+    expect(errs.find((e) => e.name === "db.query")!.service).toBe("db");
+    expect(analyze(spans)!.errors).toHaveLength(3);
+  });
+
+  it("a clean trace has no errors", () => {
+    expect(analyze(SPANS)!.errors).toEqual([]);
+  });
+});
+
 describe("cli", () => {
   function write(name: string, obj: unknown): string {
     const p = join(tmpdir(), `otel-${process.pid}-${name}`);
@@ -135,6 +155,17 @@ describe("cli", () => {
     ]);
     expect(JSON.parse(run([p, "--json"]).out[0]).spanCount).toBe(7);
     expect(run([p, "--check"]).code).toBe(1);     // N+1 present -> fail
+    rmSync(p);
+  });
+
+  it("--check also gates on error spans, and the report lists them", () => {
+    const p = write("err.json", [
+      { spanId: "r", name: "GET /", start: 0, end: 100 },
+      { spanId: "e", parentSpanId: "r", name: "charge", start: 10, end: 90, status: { code: 2 } },
+    ]);
+    const r = run([p, "--check"]);
+    expect(r.code).toBe(1);                          // an error span fails --check
+    expect(r.out.join("\n")).toContain("✗ charge");
     rmSync(p);
   });
 

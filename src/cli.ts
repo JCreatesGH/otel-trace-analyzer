@@ -10,7 +10,7 @@ Usage:
 
   <trace.json>  a flat array of spans or an OTLP-ish { spans: [...] }
   --json        emit the full analysis as JSON
-  --check       exit 1 if any N+1 pattern is detected (CI perf gate)`;
+  --check       exit 1 if any N+1 pattern or error span is detected (CI gate)`;
 
 type Analysis = NonNullable<ReturnType<typeof analyze>>;
 
@@ -28,6 +28,10 @@ export function formatReport(a: Analysis): string[] {
   if (a.nPlusOne.length) {
     lines.push(`N+1 suspects (${a.nPlusOne.length}):`);
     for (const n of a.nPlusOne.slice(0, 5)) lines.push(`  ${n.parent} → ${n.childName} ×${n.count}`);
+  }
+  if (a.errors.length) {
+    lines.push(`Errors (${a.errors.length}):`);
+    for (const e of a.errors.slice(0, 5)) lines.push(`  ✗ ${e.name}${e.service ? ` [${e.service}]` : ""}`);
   }
   return lines;
 }
@@ -55,7 +59,7 @@ export function run(argv: string[]): { code: number; out: string[]; err: string[
   const a = analyze(loadSpans(data));
   if (!a) return { code: 2, out: [], err: ["otel-trace-analyzer: no spans found"] };
   if (argv.includes("--json")) return { code: 0, out: [JSON.stringify(a, null, 2)], err: [] };
-  const code = argv.includes("--check") && a.nPlusOne.length ? 1 : 0;
+  const code = argv.includes("--check") && (a.nPlusOne.length || a.errors.length) ? 1 : 0;
   return { code, out: formatReport(a), err: [] };
 }
 

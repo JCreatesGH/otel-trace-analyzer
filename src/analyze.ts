@@ -57,6 +57,15 @@ export function findNPlusOne(root: SpanNode, threshold = 5): NPlusOne[] {
   return out.sort((a, b) => b.count - a.count);
 }
 
+export interface ErrorSpan { name: string; service?: string; }
+
+/** Spans whose normalized status is ERROR — the failing operations in a trace. */
+export function errorSpans(root: SpanNode): ErrorSpan[] {
+  return flatten(root)
+    .filter((n) => n.status === "ERROR")
+    .map((n) => ({ name: n.name, service: n.service }));
+}
+
 /** Total *self* time per service across a tree (uses the span `service` field). */
 export function byService(root: SpanNode): Record<string, number> {
   const out: Record<string, number> = {};
@@ -75,11 +84,13 @@ export function analyze(spans: Span[]) {
 
   let slowName = root.name, slowSelf = -1;
   const services: Record<string, number> = {};
+  const errors: { name: string; service?: string }[] = [];
   for (const n of all) {
     const st = selfTime(n);
     if (st > slowSelf) { slowSelf = st; slowName = n.name; }
     const svc = n.service ?? "unknown";
     services[svc] = (services[svc] ?? 0) + st;
+    if (n.status === "ERROR") errors.push({ name: n.name, service: n.service });
   }
 
   return {
@@ -90,5 +101,6 @@ export function analyze(spans: Span[]) {
     slowest: { name: slowName, selfTime: slowSelf },
     nPlusOne: forest.flatMap((r) => findNPlusOne(r)).sort((a, b) => b.count - a.count),
     byService: services,
+    errors,
   };
 }
